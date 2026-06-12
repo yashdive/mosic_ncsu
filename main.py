@@ -167,6 +167,7 @@ def build_loaders(train_patients, val_patients, patient_cell_types, patient_to_d
         val_patients, patient_cell_types, patient_to_diseases,
         config, return_metadata=True
     )
+    print(train_dataset[0]["bag"].shape)  # should still be (n_ct * 1000, 2048)
     train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True,  collate_fn=lambda x: x[0])
     val_loader   = DataLoader(val_dataset,   batch_size=1, shuffle=False, collate_fn=lambda x: x[0])
     return train_loader, val_loader, val_dataset

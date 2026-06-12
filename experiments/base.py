@@ -48,9 +48,9 @@ def build_loaders(
     return train_loader, val_loader
 
 
-def train_and_load(config: MoSICConfig, train_loader, val_loader):
+def train_and_load(config: MoSICConfig, train_loader, val_loader, fold_idx: int | None = None):
     """Train and return the best model from checkpoint."""
-    best_ckpt = run_training(config, train_loader, val_loader)
+    best_ckpt = run_training(config, train_loader, val_loader, fold_idx=fold_idx)
     model = load_model_from_checkpoint(best_ckpt, config=config, device=get_device())
     return model, best_ckpt
 

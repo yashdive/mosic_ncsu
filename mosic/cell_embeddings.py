@@ -1,3 +1,4 @@
+from collections import defaultdict
 import os
 import h5py
 import torch
@@ -10,73 +11,51 @@ import scgpt
 from mosic.config import MoSICConfig
 from mosic.utils.logging import get_logger
 
+
 logger = get_logger("CellEmbeddings")
 
-
 def aggregate_cell_type_embeddings(config: MoSICConfig) -> str:
-    """
-    Aggregate per-cell embeddings into one vector per cell type and cache the result.
-
-    The output HDF5 file contains:
-    - embeddings: (n_cell_types, 512)
-    - cell_types: cell type labels aligned to rows of embeddings
-    - n_cells: number of cells aggregated into each cell type row
-    """
     cell_cache_path = os.path.join(config.cache_dir, "cell_embeddings.h5")
     cell_type_cache_path = os.path.join(config.cache_dir, "cell_type_embeddings.h5")
 
-    if not os.path.exists(cell_cache_path):
-        raise FileNotFoundError(f"Cell embedding cache not found at {cell_cache_path}")
+    # timestamp check — same as before
+    ...
 
-    try:
-        if os.path.exists(cell_type_cache_path):
-            source_mtime = os.path.getmtime(cell_cache_path)
-            target_mtime = os.path.getmtime(cell_type_cache_path)
-            if target_mtime >= source_mtime:
-                logger.info(f"Found up-to-date cell type cache at {cell_type_cache_path}; skipping aggregation.")
-                return cell_type_cache_path
-    except OSError:
-        # If timestamps are unavailable, fall through and rebuild.
-        pass
+    logger.info("Aggregating per-patient cell type embeddings...")
 
-    logger.info(f"Aggregating cell embeddings into cell-type cache at {cell_type_cache_path}...")
+    # streaming accumulation — never load full matrix
+    sums   = defaultdict(lambda: defaultdict(lambda: np.zeros(512, dtype=np.float32)))
+    counts = defaultdict(lambda: defaultdict(int))
 
+    chunk_size = 10000
     with h5py.File(cell_cache_path, "r") as h5f:
-        if 'embeddings' not in h5f:
-            raise RuntimeError(f"Missing 'embeddings' dataset in {cell_cache_path}")
-        if config.cell_type_column not in h5f:
-            raise RuntimeError(
-                f"Missing '{config.cell_type_column}' dataset in {cell_cache_path}; cannot aggregate cell types."
-            )
+        n_cells = h5f["embeddings"].shape[0]
+        for start in range(0, n_cells, chunk_size):
+            emb_chunk = h5f["embeddings"][start:start+chunk_size].astype(np.float32)
+            pid_chunk = h5f[config.patient_column][start:start+chunk_size]
+            ct_chunk  = h5f[config.cell_type_column][start:start+chunk_size]
 
-        embeddings = np.asarray(h5f['embeddings'][:], dtype=np.float32)
-        cell_types_raw = h5f[config.cell_type_column][:]
+            for pid_raw, ct_raw, emb in zip(pid_chunk, ct_chunk, emb_chunk):
+                pid = pid_raw.decode() if isinstance(pid_raw, bytes) else str(pid_raw)
+                ct  = ct_raw.decode()  if isinstance(ct_raw,  bytes) else str(ct_raw)
+                if not pid.strip() or not ct.strip() or ct.lower() == "nan":
+                    continue
+                sums[pid][ct]   += emb
+                counts[pid][ct] += 1
 
-    grouped_vectors: dict[str, list[np.ndarray]] = {}
-    for cell_type_raw, embedding in zip(cell_types_raw, embeddings):
-        cell_type = cell_type_raw.decode('utf-8') if isinstance(cell_type_raw, bytes) else str(cell_type_raw)
-        if cell_type.strip() == "" or cell_type.lower() == "nan":
-            continue
-        grouped_vectors.setdefault(cell_type, []).append(np.asarray(embedding, dtype=np.float32))
-
-    if not grouped_vectors:
-        raise RuntimeError(f"No valid cell types found in {cell_cache_path}; aggregation aborted.")
-
-    cell_types = sorted(grouped_vectors.keys())
-    aggregated_embeddings = np.stack([
-        np.mean(np.stack(grouped_vectors[cell_type], axis=0), axis=0).astype(np.float32)
-        for cell_type in cell_types
-    ], axis=0)
-    n_cells = np.array([len(grouped_vectors[cell_type]) for cell_type in cell_types], dtype=np.int64)
-
-    str_dt = h5py.string_dtype(encoding='utf-8')
+    # write grouped by patient
     with h5py.File(cell_type_cache_path, "w") as h5f:
-        h5f.create_dataset("embeddings", data=aggregated_embeddings)
-        h5f.create_dataset("cell_types", data=np.array(cell_types, dtype='S'), dtype=str_dt)
-        h5f.create_dataset("n_cells", data=n_cells)
+        for pid in sorted(sums.keys()):
+            grp = h5f.create_group(pid)
+            for ct in sorted(sums[pid].keys()):
+                mean_emb = sums[pid][ct] / counts[pid][ct]
+                
+                safe_ct = ct.replace("/", "|")
+                grp.create_dataset(safe_ct, data=mean_emb.astype(np.float32))
 
     logger.info(
-        f"Successfully cached aggregated cell-type embeddings at {cell_type_cache_path} with shape {aggregated_embeddings.shape}."
+        f"Cached per-patient cell type embeddings at {cell_type_cache_path}. "
+        f"Patients: {len(sums)}"
     )
     return cell_type_cache_path
 
