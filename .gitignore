@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.*
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+
+# Data science
+*.h5
+*.h5ad
+*.pkl
+*.pickle
+*.joblib
+*.parquet
+
+# Model files
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Temporary files
+tmp/
+temp/
+
+# Folders
+data/
+models/
+outputs/
+
+
+*.db
+
+research.ipynb
