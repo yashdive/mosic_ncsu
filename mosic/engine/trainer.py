@@ -7,6 +7,8 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 
+import matplotlib.pyplot as plt
+
 from mosic.config import MoSICConfig
 from mosic.model.mosic_model import MoSICModel
 from mosic.utils.logging import get_logger
@@ -24,7 +26,7 @@ logger = get_logger("MoSICTrainer")
 
 
 class Trainer:
-    def __init__(self, model, optimizer, scheduler, config: MoSICConfig, device: torch.device | str):
+    def __init__(self, model, optimizer, scheduler, config: MoSICConfig, device: torch.device | str, fold_idx: int | None = None):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
@@ -35,8 +37,13 @@ class Trainer:
         self.best_val_loss = float("inf")
         self.best_checkpoint_path = os.path.join(config.checkpoint_dir, "best_model.ckpt")
         self._global_step = 0
-
+        
+        self.fold_idx  = fold_idx
         os.makedirs(config.checkpoint_dir, exist_ok=True)
+        
+        self.train_loss_history = []
+        self.val_loss_history = []
+        self.fold_idx = fold_idx
 
         self._mlflow = None
         try:
@@ -203,14 +210,44 @@ class Trainer:
             logger.info(f"Starting epoch {epoch + 1}/{self.config.max_epochs}")
             train_loss = self._train_epoch(train_loader, epoch)
             val_loss = self._val_epoch(val_loader, epoch)
+            
+            self.train_loss_history.append(train_loss)
+            self.val_loss_history.append(val_loss)
 
             if self.scheduler is not None:
                 self.scheduler.step()
 
             self._log_epoch(train_loss, val_loss, epoch)
             self._checkpoint(epoch, train_loss, val_loss)
+            
+        self._plot_convergence()
 
         return self.best_checkpoint_path
+    
+    
+    def _plot_convergence(self, fold_idx: int = None):
+        """Generates and saves a training vs validation loss curve."""
+        epochs = range(1, len(self.train_loss_history) + 1)
+        
+        plt.figure(figsize=(10, 6))
+        plt.plot(epochs, self.train_loss_history, 'b-', label='Training Loss', linewidth=2)
+        plt.plot(epochs, self.val_loss_history, 'r-', label='Validation Loss', linewidth=2)
+        
+        fold_str = f" - Fold {fold_idx}" if fold_idx is not None else ""
+        plt.title(f'Model Convergence{fold_str}', fontsize=14, fontweight='bold')
+        plt.xlabel('Epochs', fontsize=12)
+        plt.ylabel('Loss', fontsize=12)
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.legend(fontsize=11)
+        
+        # Determine save path filename dynamically based on fold
+        filename = f"convergence_fold_{self.fold_idx}.png" if self.fold_idx is not None else "convergence_curve.png"        
+        save_path = os.path.join(self.config.output_dir, filename)
+        
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300)
+        plt.close() # Free memory
+        logger.info(f"Saved convergence graph to {save_path}")
 
 
 
@@ -221,6 +258,7 @@ def run_training(
     val_loader,
     resume_from_checkpoint: str | None = None,
     device: torch.device | str | None = None,
+    fold_idx: int | None = None,
 ):
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     logger.info("Initializing raw PyTorch MoSIC trainer...")
@@ -236,11 +274,12 @@ def run_training(
         T_max=config.max_epochs,
     )
 
-    trainer = Trainer(model, optimizer, scheduler, config, device)
+    trainer = Trainer(model, optimizer, scheduler, config, device,fold_idx=fold_idx)
     best_checkpoint = trainer.fit(
         train_loader=train_loader,
         val_loader=val_loader,
         resume_from_checkpoint=resume_from_checkpoint,
+        
     )
     logger.info("Training complete.")
     return best_checkpoint

@@ -10,6 +10,9 @@ from mosic.utils.logging import get_logger
 
 import os
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from mosic.config import MoSICConfig
 
 logger = get_logger("Evaluator")
@@ -137,4 +140,42 @@ def evaluate_model(model, dataloader: DataLoader, config: MoSICConfig) -> dict:
         "classification_report": class_report,
         "confusion_matrix": conf_matrix
     }
+    
+    # Format Confusion Matrix into a legible Pandas DataFrame display
+    cm_df = pd.DataFrame(conf_matrix, index=[f"True_{l}" for l in labels_present], columns=[f"Pred_{l}" for l in labels_present])
+
+    # Log structured outputs cleanly out to terminal console screen
+    logger.info("\n" + "="*20 + " PERFORMANCE SNAPSHOT " + "="*20)
+    logger.info(f"Overall Accuracy: {accuracy:.4f}")
+    logger.info(f"\nClassification Report:\n{class_report}")
+    logger.info(f"\nConfusion Matrix:\n{cm_df.to_string()}")
+    logger.info("="*62)
+
+    # Save breakdown spreadsheets to disk
+    os.makedirs(config.output_dir, exist_ok=True)
+    pd.DataFrame(patient_records).to_csv(f"{config.output_dir}/eval_patient_predictions.csv", index=False)
+    pd.DataFrame(attention_records).to_csv(f"{config.output_dir}/eval_attention_drivers.csv", index=False)
+    cm_df.to_csv(f"{config.output_dir}/eval_confusion_matrix.csv")
+
+    # NEW: Generate and save a visual Confusion Matrix graph
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues',
+                xticklabels=labels_present, yticklabels=labels_present,
+                annot_kws={"size": 12})
+    plt.title('Evaluation Confusion Matrix', fontsize=14, fontweight='bold')
+    plt.ylabel('True Disease Label', fontsize=12)
+    plt.xlabel('Predicted Disease Label', fontsize=12)
+    plt.tight_layout()
+    
+    cm_plot_path = os.path.join(config.output_dir, "eval_confusion_matrix.png")
+    plt.savefig(cm_plot_path, dpi=300)
+    plt.close()
+    logger.info(f"Saved confusion matrix graph to {cm_plot_path}")
+
+    metrics = {
+        "accuracy": accuracy,
+        "classification_report": class_report,
+        "confusion_matrix": conf_matrix
+    }
+    
     return metrics

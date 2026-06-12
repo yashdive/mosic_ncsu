@@ -49,7 +49,7 @@ def parse_args():
     parser.add_argument("--patience",     type=int,   default=None, help="Override early stopping patience")
     parser.add_argument("--seed",         type=int,   default=42,   help="Global random seed")
     parser.add_argument("--skip_extract", action="store_true",      help="Skip feature extraction (use existing cache)")
-    parser.add_argument("--diseases",     nargs="+",  default=["CM", "CRC", "PDAC"], help="List of target diseases to filter on")
+    parser.add_argument("--diseases",     nargs="+",  default=None, help="List of target diseases to filter on")
     
     return parser.parse_args()
 
@@ -156,6 +156,9 @@ def run_cv(args, config: MoSICConfig):
 
         # Fold-specific checkpoint dir so folds don't overwrite each other
         fold_config = copy.deepcopy(config)
+        
+        fold_idx= fold + 1  # for logging purposes
+
         fold_config.checkpoint_dir = f"outputs/{cv_tag}/checkpoints/fold_{fold+1}"
         os.makedirs(fold_config.checkpoint_dir, exist_ok=True)
 
@@ -166,7 +169,7 @@ def run_cv(args, config: MoSICConfig):
         )
 
         # Train and get best model for this fold
-        model, best_ckpt = train_and_load(fold_config, train_loader, val_loader)
+        model, best_ckpt = train_and_load(fold_config, train_loader, val_loader, fold_idx)
         logger.info(f"Fold {fold+1} best checkpoint: {best_ckpt}")
 
         # Collect raw predictions — no metrics yet
